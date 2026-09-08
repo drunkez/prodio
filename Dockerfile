@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       icecast2 \
       liquidsoap \
+      nodejs \
       python3 \
       python3-pip \
       python3-venv \
@@ -41,7 +42,8 @@ RUN mkdir -p /var/log/icecast2 /usr/share/icecast2/web /usr/share/icecast2/admin
 WORKDIR /app
 
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip3 install --break-system-packages --no-cache-dir -r /app/backend/requirements.txt
+RUN pip3 install --break-system-packages --no-cache-dir -r /app/backend/requirements.txt \
+    && pip3 install --break-system-packages --no-cache-dir -U --pre "yt-dlp[default]"
 
 COPY backend /app/backend
 COPY liquidsoap /app/liquidsoap
