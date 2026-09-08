@@ -80,7 +80,8 @@ pl_normal = playlist(
   id="onair_ord",
   playlist_path,
   mode="normal",
-  reload_mode="manual"
+  reload_mode="manual",
+  prefetch=2
 )
 
 pl_random = playlist(
@@ -88,7 +89,8 @@ pl_random = playlist(
   playlist_path,
   mode="randomize",
   reload_mode="manual",
-  check_next=no_repeat
+  check_next=no_repeat,
+  prefetch=2
 )
 
 automation = switch(id="automation", track_sensitive=true, [
@@ -128,8 +130,23 @@ end
 
 radio = metadata.map(fix_meta, update=false, radio)
 
-# Keep a handle on the pre-output stream so skip/play can cut immediately
-stream = crossfade(id="stream", duration=2.0, radio)
+# True overlapping crossfade: both songs audible together (not fade-out → gap → fade-in).
+# duration must be >= fade lengths so enough audio is buffered, especially on skip/Play.
+def overlap_cross(a, b) =
+  add(normalize=false, [
+    fade.out(duration=3.5, type="sin", a.source),
+    fade.in(duration=3.5, type="sin", b.source)
+  ])
+end
+
+stream = cross(
+  id="stream",
+  duration=4.0,
+  conservative=true,
+  minimum=-1.,
+  overlap_cross,
+  radio
+)
 stream.on_track(mark_played)
 
 def do_reload(_) =
