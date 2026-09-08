@@ -38,9 +38,12 @@ def write_onair_m3u(tracks: Iterable[Track], shuffle: bool = False) -> Path:
     return settings.onair_playlist
 
 
-def _reload_liquidsoap() -> None:
+def _reload_liquidsoap(random_mode: Optional[bool] = None) -> None:
     try:
-        LiquidsoapClient().reload()
+        client = LiquidsoapClient()
+        if random_mode is not None:
+            client.set_random_mode(random_mode)
+        client.reload()
     except OSError:
         log.warning("Could not reload liquidsoap after on-air change")
 
@@ -53,11 +56,11 @@ def activate_playlist(db: Session, playlist: Playlist, shuffle: Optional[bool] =
     if state:
         state.active_playlist_id = playlist.id
         db.commit()
-    _reload_liquidsoap()
+    _reload_liquidsoap(random_mode=use_shuffle)
 
 
 def activate_library_random(db: Session) -> int:
-    """Put the whole library on air in random order. Clears selected playlist."""
+    """Put the whole library on air with per-track random selection."""
     tracks = db.query(Track).order_by(Track.id).all()
     if not tracks:
         raise ValueError("Library is empty")
@@ -66,7 +69,7 @@ def activate_library_random(db: Session) -> int:
     if state:
         state.active_playlist_id = None
         db.commit()
-    _reload_liquidsoap()
+    _reload_liquidsoap(random_mode=True)
     return len(tracks)
 
 

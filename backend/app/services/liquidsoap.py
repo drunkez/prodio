@@ -77,6 +77,9 @@ class LiquidsoapClient:
         # URI may contain spaces — liquidsoap takes the rest of the line
         return self._send(f"prodio.play {uri}")
 
+    def set_random_mode(self, enabled: bool = True) -> str:
+        return self._send("prodio.mode_random" if enabled else "prodio.mode_ordered")
+
     def current_filename(self) -> Optional[str]:
         """Return path of the currently on-air request, if any."""
         rid = self._send("request.on_air")

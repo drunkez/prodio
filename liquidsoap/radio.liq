@@ -22,22 +22,36 @@ playlist_path = getenv(default="/data/playlists/onair.m3u", "PRODIO_ONAIR_PLAYLI
 
 # Start stopped until admin hits Start
 playing = ref(false)
+# true = pick a random track each time (library / shuffle playlists)
+use_random = ref(true)
 
 # One-shot inject queue (library "Play" button)
 inject = request.queue(id="inject")
 
-raw_pl = playlist(
-  id="onair",
+pl_normal = playlist(
+  id="onair_ord",
   playlist_path,
   mode="normal",
   reload_mode="manual"
 )
 
+pl_random = playlist(
+  id="onair_rnd",
+  playlist_path,
+  mode="random",
+  reload_mode="manual"
+)
+
+automation = switch(id="automation", track_sensitive=true, [
+  ({!use_random}, mksafe(pl_random)),
+  ({true}, mksafe(pl_normal))
+])
+
 # Prefer injected track, then automation playlist
 onair_src = fallback(
   id="onair_src",
   track_sensitive=true,
-  [inject, mksafe(raw_pl)]
+  [inject, automation]
 )
 
 silence = blank(duration=1.)
@@ -66,7 +80,8 @@ radio = metadata.map(fix_meta, update=false, radio)
 radio = crossfade(duration=2.5, radio)
 
 def do_reload(_) =
-  raw_pl.reload()
+  pl_normal.reload()
+  pl_random.reload()
   "Playlist reloaded"
 end
 
@@ -89,6 +104,18 @@ def do_status(_) =
   if !playing then "playing" else "stopped" end
 end
 
+def do_mode_random(_) =
+  use_random := true
+  pl_random.reload()
+  "random"
+end
+
+def do_mode_ordered(_) =
+  use_random := false
+  pl_normal.reload()
+  "ordered"
+end
+
 # Queue a URI and skip current track so crossfade brings it in
 def do_play(uri) =
   inject.push(request.create(uri))
@@ -105,6 +132,8 @@ server.register(namespace="prodio", "skip", do_skip)
 server.register(namespace="prodio", "start", do_start)
 server.register(namespace="prodio", "stop", do_stop)
 server.register(namespace="prodio", "status", do_status)
+server.register(namespace="prodio", "mode_random", do_mode_random)
+server.register(namespace="prodio", "mode_ordered", do_mode_ordered)
 server.register(namespace="prodio", "play", do_play)
 
 output.icecast(
