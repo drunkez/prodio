@@ -1,11 +1,14 @@
+import random
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..database import Playlist, StreamState, get_db
+from ..database import Playlist, StreamState, Track, get_db
 from ..routers.auth import require_user
 from ..schemas import StreamStatus
-from ..services.icecast import fetch_listener_count, fetch_now_playing
+from ..services.icecast import fetch_listener_count, fetch_next_playing, fetch_now_playing
 from ..services.liquidsoap import LiquidsoapClient
 from ..services.playout import LIBRARY_LABEL, apply_onair_source
 
@@ -24,6 +27,9 @@ def _status(db: Session) -> StreamStatus:
         active_name = p.name if p else None
     elif state and state.is_playing:
         active_name = LIBRARY_LABEL
+    next_title = None
+    if state and state.is_playing and ls_ok:
+        next_title = fetch_next_playing(db)
     return StreamStatus(
         is_playing=bool(state and state.is_playing),
         active_playlist_id=active_id,
@@ -31,7 +37,8 @@ def _status(db: Session) -> StreamStatus:
         listeners=fetch_listener_count(),
         stream_url=settings.stream_public_url,
         station_name=settings.station_name,
-        now_playing=fetch_now_playing(db),
+        now_playing=fetch_now_playing(db) if (state and state.is_playing) else None,
+        next_playing=next_title,
         liquidsoap_ok=ls_ok,
     )
 
@@ -69,7 +76,9 @@ def start(db: Session = Depends(get_db), _: str = Depends(require_user)):
 def stop(db: Session = Depends(get_db), _: str = Depends(require_user)):
     state = db.query(StreamState).first()
     try:
-        LiquidsoapClient().stop()
+        client = LiquidsoapClient()
+        client.clear_cue()
+        client.stop()
     except OSError as exc:
         raise HTTPException(503, f"Liquidsoap unavailable: {exc}") from exc
     if state:
@@ -94,3 +103,49 @@ def reload(_: str = Depends(require_user)):
         return {"ok": True, "message": msg}
     except OSError as exc:
         raise HTTPException(503, f"Liquidsoap unavailable: {exc}") from exc
+
+
+@router.post("/reshuffle-next", response_model=StreamStatus)
+def reshuffle_next(db: Session = Depends(get_db), _: str = Depends(require_user)):
+    """Pick a new random up-next track from the active playlist or whole library."""
+    state = db.query(StreamState).first()
+    if not state or not state.is_playing:
+        raise HTTPException(400, "Stream is not playing")
+
+    settings = get_settings()
+    client = LiquidsoapClient()
+
+    # Candidate pool: selected playlist, else entire library
+    candidates: list[Track] = []
+    if state.active_playlist_id:
+        playlist = db.query(Playlist).get(state.active_playlist_id)
+        if playlist and playlist.tracks:
+            candidates = list(playlist.tracks)
+    if not candidates:
+        candidates = db.query(Track).order_by(Track.id).all()
+    if not candidates:
+        raise HTTPException(400, "No tracks available to cue")
+
+    # Avoid cueing whatever is currently on air
+    current = None
+    try:
+        current = client.current_filename()
+    except OSError:
+        current = None
+    current_name = Path(current).name if current else None
+
+    pool = [t for t in candidates if t.filename != current_name]
+    if not pool:
+        pool = candidates
+
+    pick = random.choice(pool)
+    path = settings.media_dir / pick.filename
+    if not path.exists():
+        raise HTTPException(404, f"Media missing: {pick.filename}")
+
+    try:
+        client.cue(str(path))
+    except OSError as exc:
+        raise HTTPException(503, f"Liquidsoap unavailable: {exc}") from exc
+
+    return _status(db)

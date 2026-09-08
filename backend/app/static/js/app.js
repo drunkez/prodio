@@ -108,6 +108,8 @@ async function refreshStatus() {
     $("#st-playlist").textContent = s.active_playlist_name || "—";
     $("#st-ls").textContent = s.liquidsoap_ok ? "ok" : "down";
     $("#st-np").textContent = s.now_playing || "—";
+    $("#st-next").textContent = s.next_playing || "—";
+    $("#btn-reshuffle-next").disabled = !s.is_playing;
     const a = $("#st-url");
     a.href = s.stream_url;
     a.textContent = s.stream_url;
@@ -141,6 +143,14 @@ $("#btn-reload").addEventListener("click", async () => {
   try {
     await api("/api/stream/reload", { method: "POST" });
     toast("Playlist reloaded", "good");
+    setTimeout(refreshStatus, 500);
+  } catch (e) { toast(e.message, "bad"); }
+});
+$("#btn-reshuffle-next").addEventListener("click", async () => {
+  try {
+    const s = await api("/api/stream/reshuffle-next", { method: "POST" });
+    $("#st-next").textContent = s.next_playing || "—";
+    toast(s.next_playing ? `Next: ${s.next_playing}` : "Next track reshuffled", "good");
   } catch (e) { toast(e.message, "bad"); }
 });
 

@@ -216,7 +216,7 @@ main {
   color: var(--muted);
   margin-bottom: 0.2rem;
 }
-.status-grid strong, .now-playing #st-np {
+.status-grid strong, .now-playing #st-np, .now-playing #st-next {
   font-family: var(--mono);
   font-size: 0.95rem;
 }
@@ -224,6 +224,22 @@ main {
   margin: 0.5rem 0;
   display: grid;
   gap: 0.2rem;
+}
+.up-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+.up-next .now-playing {
+  margin: 0;
+  flex: 1;
+  min-width: 180px;
+}
+.up-next button {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.82rem;
 }
 .stream-url a { color: var(--focus); word-break: break-all; }
 .btn-row {

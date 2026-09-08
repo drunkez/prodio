@@ -75,6 +75,8 @@ def no_repeat(req) =
 end
 
 inject = request.queue(id="inject")
+# Plays after the current track ends (up-next / reshuffle next)
+cue = request.queue(id="cue")
 
 pl_normal = playlist(
   id="onair_ord",
@@ -100,11 +102,17 @@ automation = switch(id="automation", track_sensitive=true, [
 
 automation.on_track(mark_played)
 
-# track_sensitive=false: cut to inject as soon as a request is ready (Play button)
+# cue waits for end of current track; inject cuts in immediately (Play button)
+scheduled = fallback(
+  id="scheduled",
+  track_sensitive=true,
+  [cue, automation]
+)
+
 onair_src = fallback(
   id="onair_src",
   track_sensitive=false,
-  [inject, automation]
+  [inject, scheduled]
 )
 
 silence = blank(duration=1.)
@@ -198,6 +206,22 @@ def do_play(uri) =
   "Playing #{uri}"
 end
 
+# Queue as up-next (plays after current track finishes)
+def do_cue(uri) =
+  cue.set_queue([])
+  cue.push.uri(uri)
+  "Cued #{uri}"
+end
+
+def do_clear_cue(_) =
+  cue.set_queue([])
+  "Cue cleared"
+end
+
+def do_is_random(_) =
+  if !use_random then "true" else "false" end
+end
+
 server.register(namespace="prodio", "reload", do_reload)
 server.register(namespace="prodio", "skip", do_skip)
 server.register(namespace="prodio", "start", do_start)
@@ -206,6 +230,9 @@ server.register(namespace="prodio", "status", do_status)
 server.register(namespace="prodio", "mode_random", do_mode_random)
 server.register(namespace="prodio", "mode_ordered", do_mode_ordered)
 server.register(namespace="prodio", "play", do_play)
+server.register(namespace="prodio", "cue", do_cue)
+server.register(namespace="prodio", "clear_cue", do_clear_cue)
+server.register(namespace="prodio", "is_random", do_is_random)
 
 output.icecast(
   %mp3(bitrate=128, samplerate=44100, stereo=true),

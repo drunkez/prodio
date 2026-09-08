@@ -78,9 +78,15 @@ def _icecast_title() -> Optional[str]:
 
 def _title_from_library(db: Session, filename: str) -> Optional[str]:
     name = Path(filename).name
+    # Strip annotate wrappers if a full URI was passed
+    if "/data/media/" in name or ":" in filename:
+        m = re.search(r"/data/media/([^:\s]+)", filename)
+        if m:
+            name = m.group(1)
+        else:
+            name = Path(filename.split(":")[-1]).name
     track = db.query(Track).filter(Track.filename == name).first()
     if not track:
-        # annotate URIs / paths sometimes include query-ish suffixes — try endswith
         track = (
             db.query(Track)
             .filter(Track.filename.like(f"%{name}"))
@@ -89,11 +95,19 @@ def _title_from_library(db: Session, filename: str) -> Optional[str]:
         )
     if track:
         return display_title(track)
-    # last resort: humanize filename stem
     stem = Path(name).stem
-    # strip trailing _deadbeef hash from our safe_name
     stem = re.sub(r"_[0-9a-f]{8}$", "", stem)
     return stem.replace("_", " ") if stem else None
+
+
+def title_for_uri(db: Optional[Session], uri: Optional[str]) -> Optional[str]:
+    if not uri:
+        return None
+    if db is None:
+        stem = Path(uri.split(":")[-1]).stem
+        stem = re.sub(r"_[0-9a-f]{8}$", "", stem)
+        return stem.replace("_", " ") if stem else None
+    return _title_from_library(db, uri)
 
 
 def fetch_now_playing(db: Optional[Session] = None) -> Optional[str]:
@@ -117,3 +131,17 @@ def fetch_now_playing(db: Optional[Session] = None) -> Optional[str]:
         return Path(filename).stem.replace("_", " ")
 
     return None if (not title or _UNKNOWN.match(title)) else title
+
+
+def fetch_next_playing(db: Optional[Session] = None) -> Optional[str]:
+    """Resolve the upcoming track title (cued override or playlist peek)."""
+    try:
+        client = LiquidsoapClient()
+        cued = client.peek_cue_filename()
+        if cued:
+            return title_for_uri(db, cued)
+        nxt = client.peek_playlist_next()
+        return title_for_uri(db, nxt)
+    except Exception as exc:
+        log.debug("Next-playing lookup failed: %s", exc)
+        return None

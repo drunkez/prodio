@@ -88,4 +88,5 @@ class StreamStatus(BaseModel):
     stream_url: str
     station_name: str
     now_playing: Optional[str] = None
+    next_playing: Optional[str] = None
     liquidsoap_ok: bool = False
