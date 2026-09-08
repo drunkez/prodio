@@ -48,6 +48,21 @@ radio = switch(track_sensitive=false, [
 ])
 
 radio = mksafe(radio)
+
+# Prefer annotate/song/title metadata for Icecast "now playing"
+def fix_meta(m) =
+  title =
+    if m["title"] != "" and m["title"] != "Unknown" then
+      m["title"]
+    elsif m["song"] != "" then
+      m["song"]
+    else
+      m["title"]
+    end
+  [("title", title), ("song", title)]
+end
+
+radio = metadata.map(fix_meta, update=false, radio)
 radio = crossfade(duration=2.5, radio)
 
 def do_reload(_) =

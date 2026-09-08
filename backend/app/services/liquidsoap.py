@@ -13,7 +13,7 @@ class LiquidsoapClient:
         self.host = host or settings.liquidsoap_host
         self.port = port or settings.liquidsoap_port
 
-    def _send(self, command: str, timeout: float = 3.0) -> str:
+    def _send(self, command: str, timeout: float = 3.0, full: bool = False) -> str:
         try:
             with socket.create_connection((self.host, self.port), timeout=timeout) as sock:
                 sock.settimeout(timeout)
@@ -29,21 +29,21 @@ class LiquidsoapClient:
                     chunks.append(data)
                     joined = b"".join(chunks)
                     if b"END" in joined or b"\r\n" in joined:
-                        # Liquidsoap often replies then waits; try exit
                         try:
                             sock.sendall(b"exit\n")
                         except OSError:
                             pass
                         break
                 text = b"".join(chunks).decode("utf-8", errors="replace")
-                # Drop telnet trailer noise
                 cleaned = []
                 for line in text.splitlines():
                     line = line.strip()
                     if not line or line in ("END", "Bye!"):
                         continue
                     cleaned.append(line)
-                return cleaned[-1] if cleaned else text.strip()
+                if not cleaned:
+                    return ""
+                return "\n".join(cleaned) if full else cleaned[-1]
         except OSError as exc:
             log.warning("Liquidsoap command failed (%s): %s", command, exc)
             raise
@@ -76,3 +76,20 @@ class LiquidsoapClient:
     def play(self, uri: str) -> str:
         # URI may contain spaces — liquidsoap takes the rest of the line
         return self._send(f"prodio.play {uri}")
+
+    def current_filename(self) -> Optional[str]:
+        """Return path of the currently on-air request, if any."""
+        rid = self._send("request.on_air")
+        if not rid or not rid.isdigit():
+            return None
+        meta = self._send(f"request.metadata {rid}", full=True)
+        for line in meta.splitlines():
+            line = line.strip()
+            if line.startswith("filename="):
+                return line.split("=", 1)[1].strip().strip('"')
+            if line.startswith("initial_uri="):
+                raw = line.split("=", 1)[1].strip().strip('"')
+                if raw.startswith("annotate:") and ":" in raw[9:]:
+                    raw = raw.rsplit(":", 1)[-1]
+                return raw
+        return None

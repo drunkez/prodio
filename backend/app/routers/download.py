@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import Track, get_db
 from ..routers.auth import require_user
 from ..schemas import DownloadRequest, TrackOut
+from ..services.media import write_tags
 from ..services.ytdlp import download_audio
 
 router = APIRouter(prefix="/api/download", tags=["download"])
@@ -20,6 +21,12 @@ def download_youtube(
         meta = download_audio(url, title_hint=body.title)
     except Exception as exc:
         raise HTTPException(400, f"Download failed: {exc}") from exc
+
+    from ..config import get_settings
+
+    settings = get_settings()
+    path = settings.media_dir / meta["filename"]
+    write_tags(str(path), title=meta["title"], artist=None)
 
     track = Track(
         title=meta["title"],

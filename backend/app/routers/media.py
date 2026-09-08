@@ -9,7 +9,7 @@ from ..config import get_settings
 from ..database import Track, get_db
 from ..routers.auth import require_user
 from ..schemas import TrackOut
-from ..services.media import probe_duration, probe_tags
+from ..services.media import probe_duration, probe_tags, write_tags
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -39,8 +39,11 @@ async def _store_upload(file: UploadFile, db: Session) -> Track:
 
     title, artist = probe_tags(str(dest))
     duration = probe_duration(str(dest))
+    resolved_title = title or Path(file.filename).stem
+    if not title or not artist:
+        write_tags(str(dest), title=resolved_title, artist=artist)
     track = Track(
-        title=title or Path(file.filename).stem,
+        title=resolved_title,
         artist=artist,
         filename=filename,
         duration=duration,
@@ -93,6 +96,7 @@ def play_track(
 
     from ..database import StreamState
     from ..services.liquidsoap import LiquidsoapClient
+    from ..services.media import write_tags
     from ..services.playout import apply_onair_source
 
     state = db.query(StreamState).first()
@@ -113,6 +117,9 @@ def play_track(
         if state:
             state.is_playing = True
             db.commit()
+
+    # Embed library metadata so Icecast/Liquidsoap show the real title
+    write_tags(str(path), title=track.title, artist=track.artist)
 
     try:
         msg = client.play(str(path))

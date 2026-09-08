@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..database import Playlist, ScheduleEntry, StreamState, Track
+from .annotate import annotate_uri, display_title
 from .liquidsoap import LiquidsoapClient
 
 log = logging.getLogger("prodio.playout")
@@ -15,12 +16,10 @@ LIBRARY_LABEL = "Library (random)"
 
 
 def _m3u_entry(track: Track, media_dir: Path) -> str:
-    path = media_dir / track.filename
-    title = track.title.replace("\n", " ")
-    artist = (track.artist or "").replace("\n", " ")
-    display = f"{artist} - {title}" if artist else title
+    display = display_title(track).replace("\n", " ")
     duration = int(track.duration or -1)
-    return f"#EXTINF:{duration},{display}\n{path}"
+    uri = annotate_uri(track, media_dir)
+    return f"#EXTINF:{duration},{display}\n{uri}"
 
 
 def write_onair_m3u(tracks: Iterable[Track], shuffle: bool = False) -> Path:

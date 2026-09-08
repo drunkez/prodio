@@ -31,7 +31,7 @@ def _status(db: Session) -> StreamStatus:
         listeners=fetch_listener_count(),
         stream_url=settings.stream_public_url,
         station_name=settings.station_name,
-        now_playing=fetch_now_playing(),
+        now_playing=fetch_now_playing(db),
         liquidsoap_ok=ls_ok,
     )
 
