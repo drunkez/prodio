@@ -7,7 +7,7 @@ from ..routers.auth import require_user
 from ..schemas import StreamStatus
 from ..services.icecast import fetch_listener_count, fetch_now_playing
 from ..services.liquidsoap import LiquidsoapClient
-from ..services.playout import activate_playlist, current_schedule_entry
+from ..services.playout import LIBRARY_LABEL, apply_onair_source
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
 
@@ -22,6 +22,8 @@ def _status(db: Session) -> StreamStatus:
     if active_id:
         p = db.query(Playlist).get(active_id)
         active_name = p.name if p else None
+    elif state and state.is_playing:
+        active_name = LIBRARY_LABEL
     return StreamStatus(
         is_playing=bool(state and state.is_playing),
         active_playlist_id=active_id,
@@ -45,27 +47,19 @@ def start(db: Session = Depends(get_db), _: str = Depends(require_user)):
     if not state:
         raise HTTPException(500, "Stream state missing")
 
-    entry = current_schedule_entry(db)
-    playlist = None
-    shuffle = False
-    if entry:
-        playlist = db.query(Playlist).get(entry.playlist_id)
-        shuffle = entry.shuffle
-    elif state.active_playlist_id:
-        playlist = db.query(Playlist).get(state.active_playlist_id)
-        shuffle = playlist.shuffle if playlist else False
-    else:
-        playlist = db.query(Playlist).order_by(Playlist.id).first()
-        shuffle = playlist.shuffle if playlist else False
-
-    if playlist and playlist.tracks:
-        activate_playlist(db, playlist, shuffle=shuffle)
+    try:
+        apply_onair_source(db, state)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     try:
         LiquidsoapClient().start()
     except OSError as exc:
         raise HTTPException(503, f"Liquidsoap unavailable: {exc}") from exc
 
+    state = db.query(StreamState).first()
+    if not state:
+        raise HTTPException(500, "Stream state missing")
     state.is_playing = True
     db.commit()
     return _status(db)
