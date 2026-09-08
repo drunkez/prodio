@@ -79,23 +79,46 @@
           <h2>Library</h2>
           <p>Upload audio or pull a track from YouTube.</p>
         </header>
-        <div class="split">
-          <form id="upload-form" class="panel">
-            <h3>Upload file</h3>
+        <div class="tools-row panel">
+          <form id="upload-form" class="tool-form">
             <input type="file" name="file" accept=".mp3,.ogg,.oga,.flac,.wav,.m4a,.aac,audio/*" required />
             <button type="submit" class="primary">Upload</button>
           </form>
-          <form id="yt-form" class="panel">
-            <h3>Download from YouTube</h3>
-            <label>URL<input name="url" type="url" placeholder="https://www.youtube.com/watch?v=…" required /></label>
-            <label>Title override<input name="title" placeholder="optional" /></label>
-            <button type="submit" class="primary">Download audio</button>
-            <p id="yt-status" class="muted"></p>
+          <form id="yt-form" class="tool-form grow">
+            <input name="url" type="url" placeholder="YouTube URL" required />
+            <input name="title" placeholder="Title (optional)" class="title-opt" />
+            <button type="submit" class="primary">Download</button>
           </form>
+          <p id="yt-status" class="muted tool-status"></p>
         </div>
-        <div class="panel">
-          <h3>Tracks</h3>
-          <div id="track-list" class="list"></div>
+        <div class="panel flush">
+          <div class="table-toolbar">
+            <input id="lib-search" type="search" placeholder="Filter tracks…" autocomplete="off" />
+            <span id="lib-count" class="muted count"></span>
+            <label class="page-size">Show
+              <select id="lib-page-size">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="250">250</option>
+                <option value="500">500</option>
+              </select>
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table class="dense-table" id="track-table">
+              <thead>
+                <tr>
+                  <th class="col-title">Title</th>
+                  <th class="col-artist">Artist</th>
+                  <th class="col-dur">Dur</th>
+                  <th class="col-file">File</th>
+                  <th class="col-act"></th>
+                </tr>
+              </thead>
+              <tbody id="track-list"></tbody>
+            </table>
+          </div>
+          <div class="pager" id="lib-pager"></div>
         </div>
       </section>
 
@@ -109,22 +132,26 @@
           <label class="check"><input type="checkbox" name="shuffle" /> Shuffle</label>
           <button type="submit" class="primary">Create</button>
         </form>
-        <div class="split">
-          <div class="panel">
-            <h3>All playlists</h3>
-            <div id="playlist-list" class="list"></div>
+        <div class="split playlists-split">
+          <div class="panel flush">
+            <div class="panel-label">Playlists</div>
+            <div id="playlist-list" class="dense-list"></div>
           </div>
-          <div class="panel" id="playlist-editor">
-            <h3>Edit <span id="pe-name">—</span></h3>
-            <div class="btn-row">
-              <button id="pe-save" class="primary" disabled>Save order</button>
+          <div class="panel flush" id="playlist-editor">
+            <div class="panel-label">Edit <span id="pe-name">—</span></div>
+            <div class="btn-row tight">
+              <button id="pe-save" class="primary" disabled>Save</button>
               <button id="pe-live" class="ghost" disabled>Go live</button>
               <button id="pe-delete" class="danger" disabled>Delete</button>
+              <label class="check"><input type="checkbox" id="pe-shuffle" /> Shuffle</label>
             </div>
-            <label class="check"><input type="checkbox" id="pe-shuffle" /> Shuffle when playing</label>
-            <div id="pe-tracks" class="list"></div>
-            <h4>Add from library</h4>
-            <div id="pe-library" class="list compact"></div>
+            <div class="panel-label">In playlist <span id="pe-track-count" class="muted"></span></div>
+            <div id="pe-tracks" class="dense-list scroll-mid"></div>
+            <div class="table-toolbar">
+              <input id="pe-lib-search" type="search" placeholder="Filter library to add…" autocomplete="off" />
+              <span id="pe-lib-count" class="muted count"></span>
+            </div>
+            <div id="pe-library" class="dense-list scroll-tall"></div>
           </div>
         </div>
       </section>

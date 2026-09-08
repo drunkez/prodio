@@ -9,6 +9,10 @@ const state = {
   days: [],
   editingPlaylistId: null,
   editingTrackIds: [],
+  libQuery: "",
+  libPage: 1,
+  libPageSize: 100,
+  peLibQuery: "",
 };
 
 function toast(msg, kind = "") {
@@ -141,6 +145,41 @@ $("#btn-reload").addEventListener("click", async () => {
 });
 
 /* ---- library ---- */
+function trackMatches(t, q) {
+  if (!q) return true;
+  const hay = `${t.title || ""} ${t.artist || ""} ${t.filename || ""}`.toLowerCase();
+  return hay.includes(q);
+}
+
+function filteredTracks(query) {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return state.tracks;
+  return state.tracks.filter((t) => trackMatches(t, q));
+}
+
+function renderPager(el, page, pageSize, total, onPage) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, page), pages);
+  if (safePage !== page) onPage(safePage);
+  el.innerHTML = "";
+  if (total === 0) return;
+  const info = document.createElement("span");
+  info.className = "page-info";
+  const from = (safePage - 1) * pageSize + 1;
+  const to = Math.min(safePage * pageSize, total);
+  info.textContent = `${from}–${to} / ${total}`;
+  el.appendChild(info);
+  const mk = (label, p, disabled = false) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", () => onPage(p));
+    el.appendChild(b);
+  };
+  mk("Prev", safePage - 1, safePage <= 1);
+  mk("Next", safePage + 1, safePage >= pages);
+}
+
 async function loadTracks() {
   state.tracks = await api("/api/media");
   renderTracks();
@@ -149,34 +188,63 @@ async function loadTracks() {
 
 function renderTracks() {
   const root = $("#track-list");
-  root.innerHTML = "";
+  const filtered = filteredTracks(state.libQuery);
+  const pageSize = state.libPageSize;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  if (state.libPage > pages) state.libPage = pages;
+  const start = (state.libPage - 1) * pageSize;
+  const slice = filtered.slice(start, start + pageSize);
+
+  $("#lib-count").textContent = state.libQuery.trim()
+    ? `${filtered.length} match · ${state.tracks.length} total`
+    : `${state.tracks.length} tracks`;
+
   if (!state.tracks.length) {
-    root.innerHTML = `<p class="muted">No tracks yet.</p>`;
+    root.innerHTML = `<tr><td colspan="5" class="muted">No tracks yet.</td></tr>`;
+    $("#lib-pager").innerHTML = "";
     return;
   }
-  for (const t of state.tracks) {
-    const row = document.createElement("div");
-    row.className = "row";
-    row.innerHTML = `
-      <div class="meta">
-        <div class="title">${escapeHtml(t.title)}${t.artist ? ` — ${escapeHtml(t.artist)}` : ""}</div>
-        <div class="sub">${escapeHtml(t.filename)} ${fmtDur(t.duration)}</div>
-      </div>
-      <button data-del="${t.id}" class="danger">Delete</button>`;
-    root.appendChild(row);
+  if (!slice.length) {
+    root.innerHTML = `<tr><td colspan="5" class="muted">No matches.</td></tr>`;
+  } else {
+    root.innerHTML = slice.map((t) => `
+      <tr>
+        <td class="col-title" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</td>
+        <td class="col-artist" title="${escapeHtml(t.artist || "")}">${escapeHtml(t.artist || "—")}</td>
+        <td class="col-dur">${fmtDur(t.duration) || "—"}</td>
+        <td class="col-file" title="${escapeHtml(t.filename)}">${escapeHtml(t.filename)}</td>
+        <td class="col-act"><button data-del="${t.id}" class="danger">Del</button></td>
+      </tr>`).join("");
   }
-  root.querySelectorAll("[data-del]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("Delete this track?")) return;
-      try {
-        await api(`/api/media/${btn.dataset.del}`, { method: "DELETE" });
-        await loadTracks();
-        await loadPlaylists();
-        toast("Deleted");
-      } catch (e) { toast(e.message, "bad"); }
-    });
+  renderPager($("#lib-pager"), state.libPage, pageSize, filtered.length, (p) => {
+    state.libPage = p;
+    renderTracks();
   });
 }
+
+$("#track-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-del]");
+  if (!btn) return;
+  if (!confirm("Delete this track?")) return;
+  try {
+    await api(`/api/media/${btn.dataset.del}`, { method: "DELETE" });
+    await loadTracks();
+    await loadPlaylists();
+    toast("Deleted");
+  } catch (err) { toast(err.message, "bad"); }
+});
+
+$("#lib-search").addEventListener("input", (e) => {
+  state.libQuery = e.target.value;
+  state.libPage = 1;
+  renderTracks();
+});
+
+$("#lib-page-size").addEventListener("change", (e) => {
+  state.libPageSize = Number(e.target.value) || 100;
+  state.libPage = 1;
+  renderTracks();
+});
 
 $("#upload-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -228,24 +296,21 @@ function renderPlaylists() {
   const root = $("#playlist-list");
   root.innerHTML = "";
   if (!state.playlists.length) {
-    root.innerHTML = `<p class="muted">No playlists yet.</p>`;
+    root.innerHTML = `<div class="drow"><span class="muted">No playlists yet.</span></div>`;
     return;
   }
-  for (const p of state.playlists) {
-    const row = document.createElement("div");
-    row.className = "row" + (p.id === state.editingPlaylistId ? " selected" : "");
-    row.innerHTML = `
-      <div class="meta">
-        <div class="title">${escapeHtml(p.name)}</div>
-        <div class="sub">${p.tracks.length} tracks${p.shuffle ? " · shuffle" : ""}</div>
-      </div>
-      <button data-edit="${p.id}">Edit</button>`;
-    root.appendChild(row);
-  }
-  root.querySelectorAll("[data-edit]").forEach((btn) => {
-    btn.addEventListener("click", () => selectPlaylist(Number(btn.dataset.edit)));
-  });
+  root.innerHTML = state.playlists.map((p) => `
+    <div class="drow${p.id === state.editingPlaylistId ? " selected" : ""}" data-edit="${p.id}">
+      <span class="t">${escapeHtml(p.name)}<span class="meta-inline">${p.tracks.length}${p.shuffle ? " · shuf" : ""}</span></span>
+      <span class="acts"><button data-edit="${p.id}">Edit</button></span>
+    </div>`).join("");
 }
+
+$("#playlist-list").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-edit]");
+  if (!el) return;
+  selectPlaylist(Number(el.dataset.edit));
+});
 
 function selectPlaylist(id) {
   const p = state.playlists.find((x) => x.id === id);
@@ -271,87 +336,106 @@ function clearPlaylistEditor() {
   $("#pe-live").disabled = true;
   $("#pe-delete").disabled = true;
   $("#pe-tracks").innerHTML = "";
+  $("#pe-track-count").textContent = "";
   renderPlaylistLibrary();
 }
 
 function renderPlaylistTracks() {
   const root = $("#pe-tracks");
-  root.innerHTML = "";
-  for (const tid of state.editingTrackIds) {
+  $("#pe-track-count").textContent = state.editingTrackIds.length
+    ? `(${state.editingTrackIds.length})`
+    : "";
+  if (!state.editingTrackIds.length) {
+    root.innerHTML = `<div class="drow"><span class="muted">Empty playlist.</span></div>`;
+    return;
+  }
+  root.innerHTML = state.editingTrackIds.map((tid) => {
     const t = state.tracks.find((x) => x.id === tid) ||
       state.playlists.flatMap((p) => p.tracks).find((x) => x.id === tid);
-    if (!t) continue;
-    const row = document.createElement("div");
-    row.className = "row";
-    row.innerHTML = `
-      <div class="meta"><div class="title">${escapeHtml(t.title)}</div></div>
-      <div>
-        <button data-up="${t.id}">↑</button>
-        <button data-down="${t.id}">↓</button>
-        <button data-rm="${t.id}" class="danger">Remove</button>
+    if (!t) return "";
+    return `
+      <div class="drow">
+        <span class="t" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>
+        <span class="acts">
+          <button data-up="${t.id}">↑</button>
+          <button data-down="${t.id}">↓</button>
+          <button data-rm="${t.id}" class="danger">×</button>
+        </span>
       </div>`;
-    root.appendChild(row);
-  }
-  root.querySelectorAll("[data-rm]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = Number(btn.dataset.rm);
-      state.editingTrackIds = state.editingTrackIds.filter((x) => x !== id);
-      renderPlaylistTracks();
-      renderPlaylistLibrary();
-    });
-  });
-  root.querySelectorAll("[data-up]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = Number(btn.dataset.up);
-      const i = state.editingTrackIds.indexOf(id);
-      if (i > 0) {
-        [state.editingTrackIds[i - 1], state.editingTrackIds[i]] =
-          [state.editingTrackIds[i], state.editingTrackIds[i - 1]];
-        renderPlaylistTracks();
-      }
-    });
-  });
-  root.querySelectorAll("[data-down]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = Number(btn.dataset.down);
-      const i = state.editingTrackIds.indexOf(id);
-      if (i >= 0 && i < state.editingTrackIds.length - 1) {
-        [state.editingTrackIds[i + 1], state.editingTrackIds[i]] =
-          [state.editingTrackIds[i], state.editingTrackIds[i + 1]];
-        renderPlaylistTracks();
-      }
-    });
-  });
+  }).join("");
 }
+
+$("#pe-tracks").addEventListener("click", (e) => {
+  const rm = e.target.closest("[data-rm]");
+  const up = e.target.closest("[data-up]");
+  const down = e.target.closest("[data-down]");
+  if (rm) {
+    const id = Number(rm.dataset.rm);
+    state.editingTrackIds = state.editingTrackIds.filter((x) => x !== id);
+    renderPlaylistTracks();
+    renderPlaylistLibrary();
+    return;
+  }
+  if (up) {
+    const id = Number(up.dataset.up);
+    const i = state.editingTrackIds.indexOf(id);
+    if (i > 0) {
+      [state.editingTrackIds[i - 1], state.editingTrackIds[i]] =
+        [state.editingTrackIds[i], state.editingTrackIds[i - 1]];
+      renderPlaylistTracks();
+    }
+    return;
+  }
+  if (down) {
+    const id = Number(down.dataset.down);
+    const i = state.editingTrackIds.indexOf(id);
+    if (i >= 0 && i < state.editingTrackIds.length - 1) {
+      [state.editingTrackIds[i + 1], state.editingTrackIds[i]] =
+        [state.editingTrackIds[i], state.editingTrackIds[i + 1]];
+      renderPlaylistTracks();
+    }
+  }
+});
 
 function renderPlaylistLibrary() {
   const root = $("#pe-library");
-  root.innerHTML = "";
+  const countEl = $("#pe-lib-count");
   if (!state.editingPlaylistId) {
-    root.innerHTML = `<p class="muted">Select a playlist to add tracks.</p>`;
+    root.innerHTML = `<div class="drow"><span class="muted">Select a playlist to add tracks.</span></div>`;
+    countEl.textContent = "";
     return;
   }
-  const available = state.tracks.filter((t) => !state.editingTrackIds.includes(t.id));
+  const inPl = new Set(state.editingTrackIds);
+  const available = filteredTracks(state.peLibQuery).filter((t) => !inPl.has(t.id));
+  countEl.textContent = `${available.length} available`;
   if (!available.length) {
-    root.innerHTML = `<p class="muted">No more tracks to add.</p>`;
+    root.innerHTML = `<div class="drow"><span class="muted">${state.peLibQuery.trim() ? "No matches." : "No more tracks to add."}</span></div>`;
     return;
   }
-  for (const t of available) {
-    const row = document.createElement("div");
-    row.className = "row";
-    row.innerHTML = `
-      <div class="meta"><div class="title">${escapeHtml(t.title)}</div></div>
-      <button data-add="${t.id}">Add</button>`;
-    root.appendChild(row);
-  }
-  root.querySelectorAll("[data-add]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.editingTrackIds.push(Number(btn.dataset.add));
-      renderPlaylistTracks();
-      renderPlaylistLibrary();
-    });
-  });
+  // Cap DOM nodes for huge libraries; filter narrows further
+  const LIMIT = 300;
+  const slice = available.slice(0, LIMIT);
+  root.innerHTML = slice.map((t) => `
+    <div class="drow">
+      <span class="t" title="${escapeHtml(t.title)}${t.artist ? " — " + escapeHtml(t.artist) : ""}">${escapeHtml(t.title)}${t.artist ? `<span class="meta-inline">${escapeHtml(t.artist)}</span>` : ""}</span>
+      <span class="acts"><button data-add="${t.id}">+</button></span>
+    </div>`).join("") + (available.length > LIMIT
+    ? `<div class="drow"><span class="muted">Showing first ${LIMIT} — refine filter for more.</span></div>`
+    : "");
 }
+
+$("#pe-library").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-add]");
+  if (!btn) return;
+  state.editingTrackIds.push(Number(btn.dataset.add));
+  renderPlaylistTracks();
+  renderPlaylistLibrary();
+});
+
+$("#pe-lib-search").addEventListener("input", (e) => {
+  state.peLibQuery = e.target.value;
+  renderPlaylistLibrary();
+});
 
 $("#playlist-create").addEventListener("submit", async (e) => {
   e.preventDefault();
