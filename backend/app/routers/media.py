@@ -26,17 +26,7 @@ def _safe_name(original: str) -> str:
     return f"{stem}_{uuid4().hex[:8]}{ext}"
 
 
-@router.get("", response_model=list[TrackOut])
-def list_tracks(db: Session = Depends(get_db), _: str = Depends(require_user)):
-    return db.query(Track).order_by(Track.created_at.desc()).all()
-
-
-@router.post("/upload", response_model=TrackOut)
-async def upload_track(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    _: str = Depends(require_user),
-):
+async def _store_upload(file: UploadFile, db: Session) -> Track:
     settings = get_settings()
     if not file.filename:
         raise HTTPException(400, "Missing filename")
@@ -44,7 +34,7 @@ async def upload_track(
     dest = settings.media_dir / filename
     content = await file.read()
     if not content:
-        raise HTTPException(400, "Empty file")
+        raise HTTPException(400, f"Empty file: {file.filename}")
     dest.write_bytes(content)
 
     title, artist = probe_tags(str(dest))
@@ -56,9 +46,36 @@ async def upload_track(
         duration=duration,
     )
     db.add(track)
-    db.commit()
-    db.refresh(track)
+    db.flush()
     return track
+
+
+@router.get("", response_model=list[TrackOut])
+def list_tracks(db: Session = Depends(get_db), _: str = Depends(require_user)):
+    return db.query(Track).order_by(Track.created_at.desc()).all()
+
+
+@router.post("/upload", response_model=list[TrackOut])
+async def upload_tracks(
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    _: str = Depends(require_user),
+):
+    if not files:
+        raise HTTPException(400, "No files uploaded")
+    tracks: list[Track] = []
+    errors: list[str] = []
+    for file in files:
+        try:
+            tracks.append(await _store_upload(file, db))
+        except HTTPException as exc:
+            errors.append(f"{file.filename or '?'}: {exc.detail}")
+    if not tracks:
+        raise HTTPException(400, "; ".join(errors) or "Upload failed")
+    db.commit()
+    for t in tracks:
+        db.refresh(t)
+    return tracks
 
 
 @router.delete("/{track_id}")

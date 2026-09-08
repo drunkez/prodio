@@ -248,13 +248,31 @@ $("#lib-page-size").addEventListener("change", (e) => {
 
 $("#upload-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const fd = new FormData(e.target);
+  const input = e.target.querySelector('input[type="file"]');
+  const files = [...(input?.files || [])];
+  if (!files.length) return;
+  const status = $("#upload-status");
+  const btn = e.target.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  status.textContent = `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`;
   try {
-    await api("/api/media/upload", { method: "POST", body: fd, headers: {} });
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f);
+    const uploaded = await api("/api/media/upload", {
+      method: "POST",
+      body: fd,
+      headers: {},
+    });
     e.target.reset();
+    status.textContent = "";
     await loadTracks();
-    toast("Uploaded", "good");
-  } catch (err) { toast(err.message, "bad"); }
+    toast(`Uploaded ${uploaded.length} file${uploaded.length === 1 ? "" : "s"}`, "good");
+  } catch (err) {
+    status.textContent = "";
+    toast(err.message, "bad");
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 $("#yt-form").addEventListener("submit", async (e) => {

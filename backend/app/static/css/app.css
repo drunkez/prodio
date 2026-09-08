@@ -280,6 +280,7 @@ main {
 .tool-form input[type="file"] { font-size: 0.82rem; max-width: 220px; }
 .tool-form button { padding: 0.4rem 0.7rem; font-size: 0.85rem; }
 .tool-status { margin: 0; width: 100%; }
+.tool-status-inline { margin: 0; font-size: 0.8rem; white-space: nowrap; }
 
 .table-toolbar {
   display: flex;

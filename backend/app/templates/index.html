@@ -81,8 +81,9 @@
         </header>
         <div class="tools-row panel">
           <form id="upload-form" class="tool-form">
-            <input type="file" name="file" accept=".mp3,.ogg,.oga,.flac,.wav,.m4a,.aac,audio/*" required />
+            <input type="file" name="files" multiple accept=".mp3,.ogg,.oga,.flac,.wav,.m4a,.aac,audio/*" required />
             <button type="submit" class="primary">Upload</button>
+            <span id="upload-status" class="muted tool-status-inline"></span>
           </form>
           <form id="yt-form" class="tool-form grow">
             <input name="url" type="url" placeholder="YouTube URL" required />
