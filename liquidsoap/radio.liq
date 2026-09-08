@@ -20,12 +20,9 @@ station_description = getenv(default="All-in-one web radio", "STATION_DESCRIPTIO
 station_genre = getenv(default="Various", "STATION_GENRE")
 playlist_path = getenv(default="/data/playlists/onair.m3u", "PRODIO_ONAIR_PLAYLIST")
 
-# Start stopped until admin hits Start
 playing = ref(false)
-# true = shuffled rounds (library / shuffle playlists)
 use_random = ref(true)
 
-# Anti-repeat: never play the same file twice in a row
 last_uri = ref("")
 reject_streak = ref(0)
 
@@ -39,7 +36,6 @@ def rec take(n, l) =
   end
 end
 
-# Remember recent tracks (up to 8) to avoid near-repeats in small reshuffles
 recent = ref([])
 
 def track_uri(m) =
@@ -65,7 +61,6 @@ def no_repeat(req) =
   if uri == "" then
     true
   elsif list.mem(uri, !recent) then
-    # Same as a recent track — reject, unless we keep failing (tiny library)
     reject_streak := !reject_streak + 1
     if !reject_streak > 20 then
       reject_streak := 0
@@ -79,7 +74,6 @@ def no_repeat(req) =
   end
 end
 
-# One-shot inject queue (library "Play" button)
 inject = request.queue(id="inject")
 
 pl_normal = playlist(
@@ -89,7 +83,6 @@ pl_normal = playlist(
   reload_mode="manual"
 )
 
-# randomize = shuffle full list, play through with no repeats, then reshuffle
 pl_random = playlist(
   id="onair_rnd",
   playlist_path,
@@ -105,23 +98,22 @@ automation = switch(id="automation", track_sensitive=true, [
 
 automation.on_track(mark_played)
 
-# Prefer injected track, then automation playlist
+# track_sensitive=false: cut to inject as soon as a request is ready (Play button)
 onair_src = fallback(
   id="onair_src",
-  track_sensitive=true,
+  track_sensitive=false,
   [inject, automation]
 )
 
 silence = blank(duration=1.)
 
-radio = switch(track_sensitive=false, [
+radio = switch(id="gate", track_sensitive=false, [
   ({!playing}, onair_src),
   ({true}, silence)
 ])
 
 radio = mksafe(radio)
 
-# Prefer annotate/song/title metadata for Icecast "now playing"
 def fix_meta(m) =
   title =
     if m["title"] != "" and m["title"] != "Unknown" then
@@ -135,7 +127,10 @@ def fix_meta(m) =
 end
 
 radio = metadata.map(fix_meta, update=false, radio)
-radio = crossfade(duration=2.5, radio)
+
+# Keep a handle on the pre-output stream so skip/play can cut immediately
+stream = crossfade(id="stream", duration=2.0, radio)
+stream.on_track(mark_played)
 
 def do_reload(_) =
   pl_normal.reload()
@@ -144,7 +139,7 @@ def do_reload(_) =
 end
 
 def do_skip(_) =
-  onair_src.skip()
+  stream.skip()
   "Skipped"
 end
 
@@ -177,14 +172,12 @@ def do_mode_ordered(_) =
   "ordered"
 end
 
-# Queue a URI and skip current track so crossfade brings it in
+# Instant library Play: clear stale queue, push resolved URI, cut current track
 def do_play(uri) =
-  inject.push(request.create(uri))
-  if !playing then
-    playing := true
-  else
-    onair_src.skip()
-  end
+  inject.set_queue([])
+  inject.push.uri(uri)
+  playing := true
+  stream.skip()
   "Playing #{uri}"
 end
 
@@ -209,5 +202,5 @@ output.icecast(
   url="http://localhost:8080",
   public=true,
   fallible=true,
-  radio
+  stream
 )

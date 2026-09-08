@@ -96,7 +96,6 @@ def play_track(
 
     from ..database import StreamState
     from ..services.liquidsoap import LiquidsoapClient
-    from ..services.media import write_tags
     from ..services.playout import apply_onair_source
 
     state = db.query(StreamState).first()
@@ -107,7 +106,6 @@ def play_track(
         try:
             apply_onair_source(db, state)
         except ValueError:
-            # Library may only contain this one file — still allow direct play
             pass
         try:
             client.start()
@@ -118,9 +116,8 @@ def play_track(
             state.is_playing = True
             db.commit()
 
-    # Embed library metadata so Icecast/Liquidsoap show the real title
-    write_tags(str(path), title=track.title, artist=track.artist)
-
+    # Bare path only — annotate URIs break over telnet when titles have quotes/spaces.
+    # Now-playing title is resolved from the library DB via the on-air filename.
     try:
         msg = client.play(str(path))
     except OSError as exc:
