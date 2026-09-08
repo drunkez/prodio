@@ -213,7 +213,10 @@ function renderTracks() {
         <td class="col-artist" title="${escapeHtml(t.artist || "")}">${escapeHtml(t.artist || "—")}</td>
         <td class="col-dur">${fmtDur(t.duration) || "—"}</td>
         <td class="col-file" title="${escapeHtml(t.filename)}">${escapeHtml(t.filename)}</td>
-        <td class="col-act"><button data-del="${t.id}" class="danger">Del</button></td>
+        <td class="col-act"><span class="acts">
+          <button data-play="${t.id}" class="primary" title="Play now">Play</button>
+          <button data-del="${t.id}" class="danger" title="Delete">Del</button>
+        </span></td>
       </tr>`).join("");
   }
   renderPager($("#lib-pager"), state.libPage, pageSize, filtered.length, (p) => {
@@ -223,6 +226,15 @@ function renderTracks() {
 }
 
 $("#track-list").addEventListener("click", async (e) => {
+  const playBtn = e.target.closest("[data-play]");
+  if (playBtn) {
+    try {
+      const res = await api(`/api/media/${playBtn.dataset.play}/play`, { method: "POST" });
+      toast(`Playing: ${res.title || "track"}`, "good");
+      refreshStatus();
+    } catch (err) { toast(err.message, "bad"); }
+    return;
+  }
   const btn = e.target.closest("[data-del]");
   if (!btn) return;
   if (!confirm("Delete this track?")) return;

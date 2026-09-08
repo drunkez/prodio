@@ -36,7 +36,14 @@ class LiquidsoapClient:
                             pass
                         break
                 text = b"".join(chunks).decode("utf-8", errors="replace")
-                return text.strip()
+                # Drop telnet trailer noise
+                cleaned = []
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line or line in ("END", "Bye!"):
+                        continue
+                    cleaned.append(line)
+                return cleaned[-1] if cleaned else text.strip()
         except OSError as exc:
             log.warning("Liquidsoap command failed (%s): %s", command, exc)
             raise
@@ -65,3 +72,7 @@ class LiquidsoapClient:
 
     def skip(self) -> str:
         return self._send("prodio.skip")
+
+    def play(self, uri: str) -> str:
+        # URI may contain spaces — liquidsoap takes the rest of the line
+        return self._send(f"prodio.play {uri}")
