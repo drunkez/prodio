@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+data/db/*.db
+data/media/*
+!data/media/.gitkeep
+data/playlists/*
+!data/playlists/.gitkeep
+*.log
+.DS_Store
+.idea/
+.vscode/
+node_modules/

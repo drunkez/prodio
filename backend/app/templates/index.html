@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProDio Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div id="login-view" class="login-view hidden">
+    <form id="login-form" class="login-box" autocomplete="on">
+      <p class="brand">ProDio</p>
+      <h1>Admin</h1>
+      <label>Username<input name="username" required autocomplete="username" /></label>
+      <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="error"></p>
+    </form>
+  </div>
+
+  <div id="app-view" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <span class="brand">ProDio</span>
+        <span class="brand-sub">control room</span>
+      </div>
+      <nav>
+        <button data-tab="dashboard" class="nav-btn active">On Air</button>
+        <button data-tab="library" class="nav-btn">Library</button>
+        <button data-tab="playlists" class="nav-btn">Playlists</button>
+        <button data-tab="radiolist" class="nav-btn">Radiolist</button>
+      </nav>
+      <button id="logout-btn" class="logout">Sign out</button>
+    </aside>
+
+    <main>
+      <section id="tab-dashboard" class="tab active">
+        <header class="section-head">
+          <h2>On Air</h2>
+          <p>Start or stop the encoder and watch live status.</p>
+        </header>
+        <div class="onair-panel">
+          <div class="vu" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+          <div class="status-grid">
+            <div>
+              <span class="label">State</span>
+              <strong id="st-playing">—</strong>
+            </div>
+            <div>
+              <span class="label">Listeners</span>
+              <strong id="st-listeners">—</strong>
+            </div>
+            <div>
+              <span class="label">Playlist</span>
+              <strong id="st-playlist">—</strong>
+            </div>
+            <div>
+              <span class="label">Liquidsoap</span>
+              <strong id="st-ls">—</strong>
+            </div>
+          </div>
+          <p class="now-playing"><span class="label">Now playing</span><span id="st-np">—</span></p>
+          <p class="stream-url"><span class="label">Stream</span><a id="st-url" href="#" target="_blank" rel="noopener">—</a></p>
+          <div class="btn-row">
+            <button id="btn-start" class="primary">Start stream</button>
+            <button id="btn-stop" class="danger">Stop stream</button>
+            <button id="btn-skip" class="ghost">Skip track</button>
+            <button id="btn-reload" class="ghost">Reload playlist</button>
+          </div>
+          <audio id="monitor" controls preload="none"></audio>
+        </div>
+      </section>
+
+      <section id="tab-library" class="tab">
+        <header class="section-head">
+          <h2>Library</h2>
+          <p>Upload audio or pull a track from YouTube.</p>
+        </header>
+        <div class="split">
+          <form id="upload-form" class="panel">
+            <h3>Upload file</h3>
+            <input type="file" name="file" accept=".mp3,.ogg,.oga,.flac,.wav,.m4a,.aac,audio/*" required />
+            <button type="submit" class="primary">Upload</button>
+          </form>
+          <form id="yt-form" class="panel">
+            <h3>Download from YouTube</h3>
+            <label>URL<input name="url" type="url" placeholder="https://www.youtube.com/watch?v=…" required /></label>
+            <label>Title override<input name="title" placeholder="optional" /></label>
+            <button type="submit" class="primary">Download audio</button>
+            <p id="yt-status" class="muted"></p>
+          </form>
+        </div>
+        <div class="panel">
+          <h3>Tracks</h3>
+          <div id="track-list" class="list"></div>
+        </div>
+      </section>
+
+      <section id="tab-playlists" class="tab">
+        <header class="section-head">
+          <h2>Playlists</h2>
+          <p>Create playlists and add or remove tracks.</p>
+        </header>
+        <form id="playlist-create" class="inline-form panel">
+          <input name="name" placeholder="New playlist name" required />
+          <label class="check"><input type="checkbox" name="shuffle" /> Shuffle</label>
+          <button type="submit" class="primary">Create</button>
+        </form>
+        <div class="split">
+          <div class="panel">
+            <h3>All playlists</h3>
+            <div id="playlist-list" class="list"></div>
+          </div>
+          <div class="panel" id="playlist-editor">
+            <h3>Edit <span id="pe-name">—</span></h3>
+            <div class="btn-row">
+              <button id="pe-save" class="primary" disabled>Save order</button>
+              <button id="pe-live" class="ghost" disabled>Go live</button>
+              <button id="pe-delete" class="danger" disabled>Delete</button>
+            </div>
+            <label class="check"><input type="checkbox" id="pe-shuffle" /> Shuffle when playing</label>
+            <div id="pe-tracks" class="list"></div>
+            <h4>Add from library</h4>
+            <div id="pe-library" class="list compact"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-radiolist" class="tab">
+        <header class="section-head">
+          <h2>Radiolist</h2>
+          <p>Schedule which playlist is on air by day and time.</p>
+        </header>
+        <form id="schedule-create" class="panel grid-form">
+          <label>Playlist
+            <select name="playlist_id" id="sch-playlist" required></select>
+          </label>
+          <label>Day
+            <select name="day_of_week" id="sch-day" required></select>
+          </label>
+          <label>Start<input name="start_time" type="time" required value="09:00" /></label>
+          <label>End<input name="end_time" type="time" required value="17:00" /></label>
+          <label class="check"><input type="checkbox" name="shuffle" /> Shuffle</label>
+          <button type="submit" class="primary">Add slot</button>
+        </form>
+        <div class="panel">
+          <h3>Schedule</h3>
+          <div id="schedule-list" class="list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

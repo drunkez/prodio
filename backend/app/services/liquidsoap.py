@@ -1,0 +1,67 @@
+import logging
+import socket
+from typing import Optional
+
+from ..config import get_settings
+
+log = logging.getLogger("prodio.liquidsoap")
+
+
+class LiquidsoapClient:
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
+        settings = get_settings()
+        self.host = host or settings.liquidsoap_host
+        self.port = port or settings.liquidsoap_port
+
+    def _send(self, command: str, timeout: float = 3.0) -> str:
+        try:
+            with socket.create_connection((self.host, self.port), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                sock.sendall((command.strip() + "\n").encode("utf-8"))
+                chunks: list[bytes] = []
+                while True:
+                    try:
+                        data = sock.recv(4096)
+                    except socket.timeout:
+                        break
+                    if not data:
+                        break
+                    chunks.append(data)
+                    joined = b"".join(chunks)
+                    if b"END" in joined or b"\r\n" in joined:
+                        # Liquidsoap often replies then waits; try exit
+                        try:
+                            sock.sendall(b"exit\n")
+                        except OSError:
+                            pass
+                        break
+                text = b"".join(chunks).decode("utf-8", errors="replace")
+                return text.strip()
+        except OSError as exc:
+            log.warning("Liquidsoap command failed (%s): %s", command, exc)
+            raise
+
+    def ping(self) -> bool:
+        try:
+            self._send("prodio.status")
+            return True
+        except OSError:
+            return False
+
+    def status(self) -> str:
+        try:
+            return self._send("prodio.status")
+        except OSError:
+            return "unavailable"
+
+    def start(self) -> str:
+        return self._send("prodio.start")
+
+    def stop(self) -> str:
+        return self._send("prodio.stop")
+
+    def reload(self) -> str:
+        return self._send("prodio.reload")
+
+    def skip(self) -> str:
+        return self._send("prodio.skip")

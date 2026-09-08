@@ -1,0 +1,17 @@
+services:
+  prodio:
+    build: .
+    container_name: prodio
+    ports:
+      - "8080:8080"   # Admin UI + API
+      - "8000:8000"   # Icecast stream
+    env_file:
+      - .env
+    environment:
+      ICECAST_HOST: "127.0.0.1"
+      PRODIO_ONAIR_PLAYLIST: /data/playlists/onair.m3u
+    volumes:
+      - ./data:/data
+      - ./liquidsoap:/app/liquidsoap:ro
+      - ./config:/app/config:ro
+    restart: unless-stopped

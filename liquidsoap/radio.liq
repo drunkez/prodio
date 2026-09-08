@@ -1,0 +1,86 @@
+#!/usr/bin/liquidsoap
+
+# ProDio automation / encoder — Liquidsoap 2.1.x compatible
+# Controlled via telnet on port 1234
+
+settings.server.telnet.set(true)
+settings.server.telnet.port.set(1234)
+settings.server.telnet.bind_addr.set("127.0.0.1")
+
+log.level.set(3)
+settings.init.daemon.set(false)
+settings.init.allow_root.set(true)
+
+icecast_host = getenv(default="127.0.0.1", "ICECAST_HOST")
+icecast_port = int_of_string(getenv(default="8000", "ICECAST_PORT"))
+icecast_password = getenv(default="hackme", "ICECAST_SOURCE_PASSWORD")
+icecast_mount = getenv(default="/live", "ICECAST_MOUNT")
+station_name = getenv(default="ProDio", "STATION_NAME")
+station_description = getenv(default="All-in-one web radio", "STATION_DESCRIPTION")
+station_genre = getenv(default="Various", "STATION_GENRE")
+playlist_path = getenv(default="/data/playlists/onair.m3u", "PRODIO_ONAIR_PLAYLIST")
+
+# Start stopped until admin hits Start
+playing = ref(false)
+
+raw_pl = playlist(
+  id="onair",
+  playlist_path,
+  mode="normal",
+  reload_mode="manual"
+)
+
+silence = blank(duration=1.)
+
+radio = switch(track_sensitive=false, [
+  ({!playing}, mksafe(raw_pl)),
+  ({true}, silence)
+])
+
+radio = mksafe(radio)
+radio = crossfade(duration=2.5, radio)
+
+def do_reload(_) =
+  raw_pl.reload()
+  "Playlist reloaded"
+end
+
+def do_skip(_) =
+  raw_pl.skip()
+  "Skipped"
+end
+
+def do_start(_) =
+  playing := true
+  "Streaming started"
+end
+
+def do_stop(_) =
+  playing := false
+  "Streaming stopped"
+end
+
+def do_status(_) =
+  if !playing then "playing" else "stopped" end
+end
+
+server.register(namespace="prodio", "reload", do_reload)
+server.register(namespace="prodio", "skip", do_skip)
+server.register(namespace="prodio", "start", do_start)
+server.register(namespace="prodio", "stop", do_stop)
+server.register(namespace="prodio", "status", do_status)
+
+output.icecast(
+  %mp3(bitrate=128, samplerate=44100, stereo=true),
+  host=icecast_host,
+  port=icecast_port,
+  password=icecast_password,
+  mount=icecast_mount,
+  name=station_name,
+  description=station_description,
+  genre=station_genre,
+  url="http://localhost:8080",
+  public=true,
+  fallible=true,
+  radio
+)

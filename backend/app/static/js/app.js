@@ -1,0 +1,530 @@
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+const state = {
+  user: null,
+  tracks: [],
+  playlists: [],
+  schedule: [],
+  days: [],
+  editingPlaylistId: null,
+  editingTrackIds: [],
+};
+
+function toast(msg, kind = "") {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.className = `toast ${kind}`;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.add("hidden"), 3200);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    headers: opts.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
+    ...opts,
+  });
+  if (res.status === 401) {
+    showLogin();
+    throw new Error("Unauthorized");
+  }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { detail: text }; }
+  if (!res.ok) {
+    const detail = data?.detail;
+    const msg = typeof detail === "string" ? detail : JSON.stringify(detail || res.statusText);
+    throw new Error(msg);
+  }
+  return data;
+}
+
+function showLogin() {
+  $("#login-view").classList.remove("hidden");
+  $("#app-view").classList.add("hidden");
+}
+
+function showApp() {
+  $("#login-view").classList.add("hidden");
+  $("#app-view").classList.remove("hidden");
+}
+
+function fmtDur(sec) {
+  if (sec == null || Number.isNaN(sec)) return "";
+  const s = Math.round(sec);
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/* ---- tabs ---- */
+$$(".nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    $$(".nav-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    $$(".tab").forEach((t) => t.classList.remove("active"));
+    $(`#tab-${btn.dataset.tab}`).classList.add("active");
+  });
+});
+
+/* ---- auth ---- */
+$("#login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  $("#login-error").textContent = "";
+  try {
+    await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username: fd.get("username"),
+        password: fd.get("password"),
+      }),
+    });
+    await boot();
+  } catch (err) {
+    $("#login-error").textContent = err.message || "Login failed";
+  }
+});
+
+$("#logout-btn").addEventListener("click", async () => {
+  await api("/api/auth/logout", { method: "POST" });
+  showLogin();
+});
+
+/* ---- dashboard ---- */
+async function refreshStatus() {
+  try {
+    const s = await api("/api/stream/status");
+    const panel = $(".onair-panel");
+    panel.classList.toggle("live", !!s.is_playing);
+    $("#st-playing").textContent = s.is_playing ? "LIVE" : "STOPPED";
+    $("#st-playing").style.color = s.is_playing ? "var(--onair)" : "var(--muted)";
+    $("#st-listeners").textContent = s.listeners == null ? "—" : String(s.listeners);
+    $("#st-playlist").textContent = s.active_playlist_name || "—";
+    $("#st-ls").textContent = s.liquidsoap_ok ? "ok" : "down";
+    $("#st-np").textContent = s.now_playing || "—";
+    const a = $("#st-url");
+    a.href = s.stream_url;
+    a.textContent = s.stream_url;
+    const mon = $("#monitor");
+    if (mon.src !== s.stream_url) mon.src = s.stream_url;
+  } catch (_) { /* ignore while logged out */ }
+}
+
+$("#btn-start").addEventListener("click", async () => {
+  try {
+    await api("/api/stream/start", { method: "POST" });
+    toast("Stream started", "good");
+    refreshStatus();
+  } catch (e) { toast(e.message, "bad"); }
+});
+$("#btn-stop").addEventListener("click", async () => {
+  try {
+    await api("/api/stream/stop", { method: "POST" });
+    toast("Stream stopped");
+    refreshStatus();
+  } catch (e) { toast(e.message, "bad"); }
+});
+$("#btn-skip").addEventListener("click", async () => {
+  try {
+    await api("/api/stream/skip", { method: "POST" });
+    toast("Skipped", "good");
+    setTimeout(refreshStatus, 800);
+  } catch (e) { toast(e.message, "bad"); }
+});
+$("#btn-reload").addEventListener("click", async () => {
+  try {
+    await api("/api/stream/reload", { method: "POST" });
+    toast("Playlist reloaded", "good");
+  } catch (e) { toast(e.message, "bad"); }
+});
+
+/* ---- library ---- */
+async function loadTracks() {
+  state.tracks = await api("/api/media");
+  renderTracks();
+  renderPlaylistLibrary();
+}
+
+function renderTracks() {
+  const root = $("#track-list");
+  root.innerHTML = "";
+  if (!state.tracks.length) {
+    root.innerHTML = `<p class="muted">No tracks yet.</p>`;
+    return;
+  }
+  for (const t of state.tracks) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <div class="meta">
+        <div class="title">${escapeHtml(t.title)}${t.artist ? ` — ${escapeHtml(t.artist)}` : ""}</div>
+        <div class="sub">${escapeHtml(t.filename)} ${fmtDur(t.duration)}</div>
+      </div>
+      <button data-del="${t.id}" class="danger">Delete</button>`;
+    root.appendChild(row);
+  }
+  root.querySelectorAll("[data-del]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this track?")) return;
+      try {
+        await api(`/api/media/${btn.dataset.del}`, { method: "DELETE" });
+        await loadTracks();
+        await loadPlaylists();
+        toast("Deleted");
+      } catch (e) { toast(e.message, "bad"); }
+    });
+  });
+}
+
+$("#upload-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  try {
+    await api("/api/media/upload", { method: "POST", body: fd, headers: {} });
+    e.target.reset();
+    await loadTracks();
+    toast("Uploaded", "good");
+  } catch (err) { toast(err.message, "bad"); }
+});
+
+$("#yt-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const status = $("#yt-status");
+  status.textContent = "Downloading… this can take a minute.";
+  try {
+    await api("/api/download/youtube", {
+      method: "POST",
+      body: JSON.stringify({
+        url: fd.get("url"),
+        title: fd.get("title") || null,
+      }),
+    });
+    e.target.reset();
+    status.textContent = "";
+    await loadTracks();
+    toast("Downloaded", "good");
+  } catch (err) {
+    status.textContent = "";
+    toast(err.message, "bad");
+  }
+});
+
+/* ---- playlists ---- */
+async function loadPlaylists() {
+  state.playlists = await api("/api/playlists");
+  renderPlaylists();
+  fillSchedulePlaylistSelect();
+  if (state.editingPlaylistId) {
+    const p = state.playlists.find((x) => x.id === state.editingPlaylistId);
+    if (p) selectPlaylist(p.id);
+    else clearPlaylistEditor();
+  }
+}
+
+function renderPlaylists() {
+  const root = $("#playlist-list");
+  root.innerHTML = "";
+  if (!state.playlists.length) {
+    root.innerHTML = `<p class="muted">No playlists yet.</p>`;
+    return;
+  }
+  for (const p of state.playlists) {
+    const row = document.createElement("div");
+    row.className = "row" + (p.id === state.editingPlaylistId ? " selected" : "");
+    row.innerHTML = `
+      <div class="meta">
+        <div class="title">${escapeHtml(p.name)}</div>
+        <div class="sub">${p.tracks.length} tracks${p.shuffle ? " · shuffle" : ""}</div>
+      </div>
+      <button data-edit="${p.id}">Edit</button>`;
+    root.appendChild(row);
+  }
+  root.querySelectorAll("[data-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => selectPlaylist(Number(btn.dataset.edit)));
+  });
+}
+
+function selectPlaylist(id) {
+  const p = state.playlists.find((x) => x.id === id);
+  if (!p) return;
+  state.editingPlaylistId = id;
+  state.editingTrackIds = p.tracks.map((t) => t.id);
+  $("#pe-name").textContent = p.name;
+  $("#pe-shuffle").checked = p.shuffle;
+  $("#pe-save").disabled = false;
+  $("#pe-live").disabled = false;
+  $("#pe-delete").disabled = false;
+  renderPlaylists();
+  renderPlaylistTracks();
+  renderPlaylistLibrary();
+}
+
+function clearPlaylistEditor() {
+  state.editingPlaylistId = null;
+  state.editingTrackIds = [];
+  $("#pe-name").textContent = "—";
+  $("#pe-shuffle").checked = false;
+  $("#pe-save").disabled = true;
+  $("#pe-live").disabled = true;
+  $("#pe-delete").disabled = true;
+  $("#pe-tracks").innerHTML = "";
+  renderPlaylistLibrary();
+}
+
+function renderPlaylistTracks() {
+  const root = $("#pe-tracks");
+  root.innerHTML = "";
+  for (const tid of state.editingTrackIds) {
+    const t = state.tracks.find((x) => x.id === tid) ||
+      state.playlists.flatMap((p) => p.tracks).find((x) => x.id === tid);
+    if (!t) continue;
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <div class="meta"><div class="title">${escapeHtml(t.title)}</div></div>
+      <div>
+        <button data-up="${t.id}">↑</button>
+        <button data-down="${t.id}">↓</button>
+        <button data-rm="${t.id}" class="danger">Remove</button>
+      </div>`;
+    root.appendChild(row);
+  }
+  root.querySelectorAll("[data-rm]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.rm);
+      state.editingTrackIds = state.editingTrackIds.filter((x) => x !== id);
+      renderPlaylistTracks();
+      renderPlaylistLibrary();
+    });
+  });
+  root.querySelectorAll("[data-up]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.up);
+      const i = state.editingTrackIds.indexOf(id);
+      if (i > 0) {
+        [state.editingTrackIds[i - 1], state.editingTrackIds[i]] =
+          [state.editingTrackIds[i], state.editingTrackIds[i - 1]];
+        renderPlaylistTracks();
+      }
+    });
+  });
+  root.querySelectorAll("[data-down]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.down);
+      const i = state.editingTrackIds.indexOf(id);
+      if (i >= 0 && i < state.editingTrackIds.length - 1) {
+        [state.editingTrackIds[i + 1], state.editingTrackIds[i]] =
+          [state.editingTrackIds[i], state.editingTrackIds[i + 1]];
+        renderPlaylistTracks();
+      }
+    });
+  });
+}
+
+function renderPlaylistLibrary() {
+  const root = $("#pe-library");
+  root.innerHTML = "";
+  if (!state.editingPlaylistId) {
+    root.innerHTML = `<p class="muted">Select a playlist to add tracks.</p>`;
+    return;
+  }
+  const available = state.tracks.filter((t) => !state.editingTrackIds.includes(t.id));
+  if (!available.length) {
+    root.innerHTML = `<p class="muted">No more tracks to add.</p>`;
+    return;
+  }
+  for (const t of available) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <div class="meta"><div class="title">${escapeHtml(t.title)}</div></div>
+      <button data-add="${t.id}">Add</button>`;
+    root.appendChild(row);
+  }
+  root.querySelectorAll("[data-add]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingTrackIds.push(Number(btn.dataset.add));
+      renderPlaylistTracks();
+      renderPlaylistLibrary();
+    });
+  });
+}
+
+$("#playlist-create").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  try {
+    const p = await api("/api/playlists", {
+      method: "POST",
+      body: JSON.stringify({
+        name: fd.get("name"),
+        shuffle: fd.get("shuffle") === "on",
+      }),
+    });
+    e.target.reset();
+    await loadPlaylists();
+    selectPlaylist(p.id);
+    toast("Playlist created", "good");
+  } catch (err) { toast(err.message, "bad"); }
+});
+
+$("#pe-save").addEventListener("click", async () => {
+  if (!state.editingPlaylistId) return;
+  try {
+    await api(`/api/playlists/${state.editingPlaylistId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        shuffle: $("#pe-shuffle").checked,
+        track_ids: state.editingTrackIds,
+      }),
+    });
+    await loadPlaylists();
+    toast("Playlist saved", "good");
+  } catch (e) { toast(e.message, "bad"); }
+});
+
+$("#pe-live").addEventListener("click", async () => {
+  if (!state.editingPlaylistId) return;
+  try {
+    await api(`/api/playlists/${state.editingPlaylistId}/go-live`, { method: "POST" });
+    toast("Playlist is on air", "good");
+    refreshStatus();
+  } catch (e) { toast(e.message, "bad"); }
+});
+
+$("#pe-delete").addEventListener("click", async () => {
+  if (!state.editingPlaylistId) return;
+  if (!confirm("Delete this playlist?")) return;
+  try {
+    await api(`/api/playlists/${state.editingPlaylistId}`, { method: "DELETE" });
+    clearPlaylistEditor();
+    await loadPlaylists();
+    toast("Playlist deleted");
+  } catch (e) { toast(e.message, "bad"); }
+});
+
+/* ---- radiolist ---- */
+async function loadSchedule() {
+  state.schedule = await api("/api/radiolist");
+  state.days = await api("/api/radiolist/days");
+  fillScheduleDaySelect();
+  fillSchedulePlaylistSelect();
+  renderSchedule();
+}
+
+function fillScheduleDaySelect() {
+  const sel = $("#sch-day");
+  sel.innerHTML = state.days.map((d) => `<option value="${d.id}">${d.name}</option>`).join("");
+}
+
+function fillSchedulePlaylistSelect() {
+  const sel = $("#sch-playlist");
+  sel.innerHTML = state.playlists
+    .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`)
+    .join("");
+}
+
+function dayName(id) {
+  return state.days.find((d) => d.id === id)?.name || String(id);
+}
+
+function renderSchedule() {
+  const root = $("#schedule-list");
+  root.innerHTML = "";
+  if (!state.schedule.length) {
+    root.innerHTML = `<p class="muted">No schedule slots yet.</p>`;
+    return;
+  }
+  for (const e of state.schedule) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <div class="meta">
+        <div class="title">${dayName(e.day_of_week)} ${e.start_time}–${e.end_time} · ${escapeHtml(e.playlist_name)}</div>
+        <div class="sub">${e.shuffle ? "shuffle · " : ""}${e.enabled ? "enabled" : "disabled"}</div>
+      </div>
+      <div>
+        <button data-tog="${e.id}">${e.enabled ? "Disable" : "Enable"}</button>
+        <button data-shuf="${e.id}">${e.shuffle ? "No shuffle" : "Shuffle"}</button>
+        <button data-del="${e.id}" class="danger">Remove</button>
+      </div>`;
+    root.appendChild(row);
+  }
+  root.querySelectorAll("[data-del]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/radiolist/${btn.dataset.del}`, { method: "DELETE" });
+        await loadSchedule();
+        toast("Slot removed");
+      } catch (e) { toast(e.message, "bad"); }
+    });
+  });
+  root.querySelectorAll("[data-tog]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const entry = state.schedule.find((x) => x.id === Number(btn.dataset.tog));
+      try {
+        await api(`/api/radiolist/${btn.dataset.tog}`, {
+          method: "PUT",
+          body: JSON.stringify({ enabled: !entry.enabled }),
+        });
+        await loadSchedule();
+      } catch (e) { toast(e.message, "bad"); }
+    });
+  });
+  root.querySelectorAll("[data-shuf]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const entry = state.schedule.find((x) => x.id === Number(btn.dataset.shuf));
+      try {
+        await api(`/api/radiolist/${btn.dataset.shuf}`, {
+          method: "PUT",
+          body: JSON.stringify({ shuffle: !entry.shuffle }),
+        });
+        await loadSchedule();
+      } catch (e) { toast(e.message, "bad"); }
+    });
+  });
+}
+
+$("#schedule-create").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  try {
+    await api("/api/radiolist", {
+      method: "POST",
+      body: JSON.stringify({
+        playlist_id: Number(fd.get("playlist_id")),
+        day_of_week: Number(fd.get("day_of_week")),
+        start_time: fd.get("start_time"),
+        end_time: fd.get("end_time"),
+        shuffle: fd.get("shuffle") === "on",
+      }),
+    });
+    await loadSchedule();
+    toast("Slot added", "good");
+  } catch (err) { toast(err.message, "bad"); }
+});
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+async function boot() {
+  try {
+    const me = await api("/api/auth/me");
+    state.user = me.user;
+    showApp();
+    await Promise.all([loadTracks(), loadPlaylists(), loadSchedule(), refreshStatus()]);
+  } catch {
+    showLogin();
+  }
+}
+
+boot();
+setInterval(refreshStatus, 5000);
