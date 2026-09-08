@@ -22,8 +22,62 @@ playlist_path = getenv(default="/data/playlists/onair.m3u", "PRODIO_ONAIR_PLAYLI
 
 # Start stopped until admin hits Start
 playing = ref(false)
-# true = pick a random track each time (library / shuffle playlists)
+# true = shuffled rounds (library / shuffle playlists)
 use_random = ref(true)
+
+# Anti-repeat: never play the same file twice in a row
+last_uri = ref("")
+reject_streak = ref(0)
+
+def rec take(n, l) =
+  if n <= 0 then
+    []
+  elsif list.is_empty(l) then
+    []
+  else
+    list.hd(l) :: take(n - 1, list.tl(l))
+  end
+end
+
+# Remember recent tracks (up to 8) to avoid near-repeats in small reshuffles
+recent = ref([])
+
+def track_uri(m) =
+  if m["filename"] != "" then
+    m["filename"]
+  else
+    m["initial_uri"]
+  end
+end
+
+def mark_played(m) =
+  uri = track_uri(m)
+  if uri != "" then
+    last_uri := uri
+    recent := take(8, uri :: !recent)
+    reject_streak := 0
+  end
+end
+
+def no_repeat(req) =
+  m = request.metadata(req)
+  uri = if m["filename"] != "" then m["filename"] else request.uri(req) end
+  if uri == "" then
+    true
+  elsif list.mem(uri, !recent) then
+    # Same as a recent track — reject, unless we keep failing (tiny library)
+    reject_streak := !reject_streak + 1
+    if !reject_streak > 20 then
+      reject_streak := 0
+      true
+    else
+      false
+    end
+  else
+    reject_streak := 0
+    true
+  end
+end
 
 # One-shot inject queue (library "Play" button)
 inject = request.queue(id="inject")
@@ -35,17 +89,21 @@ pl_normal = playlist(
   reload_mode="manual"
 )
 
+# randomize = shuffle full list, play through with no repeats, then reshuffle
 pl_random = playlist(
   id="onair_rnd",
   playlist_path,
-  mode="random",
-  reload_mode="manual"
+  mode="randomize",
+  reload_mode="manual",
+  check_next=no_repeat
 )
 
 automation = switch(id="automation", track_sensitive=true, [
   ({!use_random}, mksafe(pl_random)),
   ({true}, mksafe(pl_normal))
 ])
+
+automation.on_track(mark_played)
 
 # Prefer injected track, then automation playlist
 onair_src = fallback(
@@ -106,6 +164,9 @@ end
 
 def do_mode_random(_) =
   use_random := true
+  recent := []
+  last_uri := ""
+  reject_streak := 0
   pl_random.reload()
   "random"
 end
